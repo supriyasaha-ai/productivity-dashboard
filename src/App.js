@@ -1,1 +1,1 @@
-import React from 'react'; import App from './productivity_dashboard'; export default App;
+export { default } from './productivity_dashboard';
