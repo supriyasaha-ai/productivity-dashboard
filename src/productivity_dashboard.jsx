@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 /* ─── CONFIGURATION — paste your Apps Script URL here after deploying ────── */
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx5qUYNykaYb9o5Hrg2TSYMeDnljAxh3TydomgNUiC5aS4p2PwpJuBIIihJ1Yn4ODjk/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynHgYwGKV1GbPj7W-1dj3yFv5FOACdVIzEn0Z-IxUJJ7ZvnZ1rkjzWN1hCtqR2BOKVBg/exec";
 /* ────────────────────────────────────────────────────────────────────────── */
 
 const T = {
