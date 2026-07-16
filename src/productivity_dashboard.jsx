@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 
 /* ─── CONFIGURATION ──────────────────────────────────────────────────────── */
-const APPS_SCRIPT_URL = "YOUR_APPS_SCRIPT_URL_HERE";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbymt0JLmP2KEdtXZzu3zH_PWUXOaw1nK2hDV8Rd46a48iX2F8E3dGM7A7eFnnlIZNb1Mg/exec";
 /* ────────────────────────────────────────────────────────────────────────── */
 
 const T = {
