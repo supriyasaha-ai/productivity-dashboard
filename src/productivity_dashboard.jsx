@@ -601,7 +601,7 @@ function JobTracker(){
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
               <thead>
                 <tr style={{background:T.surfaceUp,borderBottom:`1px solid ${T.border}`}}>
-                  {[["","28px"],["Company / Role","220px"],["Status","140px"],["Platform","110px"],["Email Date","100px"],["Follow-up","130px"],["Salary","140px"],["Contacts","160px"],["Actions","90px"]].map(([h,w])=>(
+                  {[["","28px"],["Company","160px"],["Role","160px"],["Status","140px"],["Platform","110px"],["Email Date","100px"],["Follow-up","130px"],["Salary","130px"],["Contacts","150px"],["Notes","180px"],["Actions","90px"]].map(([h,w])=>(
                     <th key={h} style={{padding:"9px 12px",textAlign:"left",fontWeight:600,color:T.textDim,fontSize:10,textTransform:"uppercase",letterSpacing:"0.1em",width:w,whiteSpace:"nowrap"}}>{h}</th>
                   ))}
                 </tr>
@@ -615,24 +615,27 @@ function JobTracker(){
                   const contacts = app.contacts||[];
 
                   return(
-                    <tr key={app.id} style={{borderBottom:`1px solid ${T.border}`,background:i%2===0?T.surface:T.bg}}>
+                    <tr key={app.id} style={{borderBottom:`1px solid ${T.border}`,background:T.surface}}>
 
                       {/* Priority dot */}
                       <td style={{padding:"10px 8px 10px 14px"}}>
                         <span title={app.priority||"Medium"} style={{display:"block",width:7,height:7,borderRadius:"50%",background:pri.dot}}/>
                       </td>
 
-                      {/* Company / Role */}
-                      <td style={{padding:"10px 12px",maxWidth:220}}>
-                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      {/* Company */}
+                      <td style={{padding:"10px 12px",maxWidth:160}}>
+                        <div style={{display:"flex",alignItems:"center",gap:5}}>
                           <span style={{fontWeight:600,color:T.text,lineHeight:1.3}}>{app.company||"—"}</span>
                           {app.jobLink&&(
                             <a href={app.jobLink} target="_blank" rel="noopener noreferrer"
-                              style={{fontSize:10,color:T.blue,textDecoration:"none",opacity:0.7,flexShrink:0}} title="View job posting">↗</a>
+                              style={{fontSize:10,color:T.blue,textDecoration:"none",flexShrink:0}} title="View job posting">↗</a>
                           )}
                         </div>
-                        <div style={{color:T.textMid,fontSize:11,marginTop:2,lineHeight:1.4}}>{app.role||"—"}</div>
-                        {app.notes&&<div style={{fontSize:10,color:T.textDim,marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}}>{app.notes}</div>}
+                      </td>
+
+                      {/* Role */}
+                      <td style={{padding:"10px 12px",maxWidth:160}}>
+                        <div style={{color:T.textMid,fontSize:12,lineHeight:1.4}}>{app.role||"—"}</div>
                       </td>
 
                       {/* Status — inline dropdown */}
@@ -704,6 +707,14 @@ function JobTracker(){
                             ))}
                           </div>
                         )}
+                      </td>
+
+                      {/* Notes */}
+                      <td style={{padding:"10px 12px",maxWidth:180}}>
+                        {app.notes
+                          ?<span style={{fontSize:11,color:T.textDim,display:"block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={app.notes}>{app.notes}</span>
+                          :<span style={{color:T.textDim,fontSize:11}}>—</span>
+                        }
                       </td>
 
                       {/* Actions */}
