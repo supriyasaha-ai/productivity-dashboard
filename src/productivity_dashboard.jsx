@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 
 /* ─── CONFIGURATION ──────────────────────────────────────────────────────── */
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbymt0JLmP2KEdtXZzu3zH_PWUXOaw1nK2hDV8Rd46a48iX2F8E3dGM7A7eFnnlIZNb1Mg/exec";
+const APPS_SCRIPT_URL = "YOUR_APPS_SCRIPT_URL_HERE";
 /* ────────────────────────────────────────────────────────────────────────── */
 
 /* ─── Dark mode design tokens ────────────────────────────────────────────── */
@@ -37,19 +37,21 @@ const T = {
 
 /* ─── Status config ──────────────────────────────────────────────────────── */
 const DEFAULT_PLATFORMS = ["LinkedIn","Naukri","Wellfound","Company Website","Referral","Other"];
-const STATUSES = ["To Apply","Applied","Follow-up 1","Follow-up 2","Follow-up 3","Interview","Offer","Rejected","Ghosted"];
+const STATUSES = ["To Apply","Applied","Follow-up 1","Follow-up 2","Follow-up 3","Assignment","Call Scheduled","Interview","Offer","Rejected","Ghosted"];
 const PRIORITIES = ["High","Medium","Low"];
 
 const STATUS_META = {
-  "To Apply":    {bg:T.slatePale,   text:T.textMid,   dot:T.slate,  border:T.border},
-  "Applied":     {bg:T.bluePale,    text:T.blue,      dot:T.blue,   border:T.blueDim},
-  "Follow-up 1": {bg:T.amberPale,   text:T.amber,     dot:T.amber,  border:T.amberDim},
-  "Follow-up 2": {bg:T.amberPale,   text:"#FFD060",   dot:"#FFD060",border:T.amberDim},
-  "Follow-up 3": {bg:"#2E1500",     text:"#FF9020",   dot:"#FF9020",border:"#6E3A00"},
-  "Interview":   {bg:T.violetPale,  text:T.violet,    dot:T.violet, border:T.violetDim},
-  "Offer":       {bg:T.greenPale,   text:T.green,     dot:T.green,  border:T.greenDim},
-  "Rejected":    {bg:T.redPale,     text:T.red,       dot:T.red,    border:T.redDim},
-  "Ghosted":     {bg:"#1A1A1A",     text:"#555",      dot:"#333",   border:"#2A2A2A"},
+  "To Apply":       {bg:T.slatePale,   text:T.textMid,   dot:T.slate,   border:T.border},
+  "Applied":        {bg:T.bluePale,    text:T.blue,      dot:T.blue,    border:T.blueDim},
+  "Follow-up 1":    {bg:T.amberPale,   text:T.amber,     dot:T.amber,   border:T.amberDim},
+  "Follow-up 2":    {bg:T.amberPale,   text:"#FFD060",   dot:"#FFD060", border:T.amberDim},
+  "Follow-up 3":    {bg:"#2E1500",     text:"#FF9020",   dot:"#FF9020", border:"#6E3A00"},
+  "Assignment":     {bg:"#1A1040",     text:"#A78BFA",   dot:"#A78BFA", border:"#3D2080"},
+  "Call Scheduled": {bg:"#0A2A20",     text:"#34D399",   dot:"#34D399", border:"#0D5C3A"},
+  "Interview":      {bg:T.violetPale,  text:T.violet,    dot:T.violet,  border:T.violetDim},
+  "Offer":          {bg:T.greenPale,   text:T.green,     dot:T.green,   border:T.greenDim},
+  "Rejected":       {bg:T.redPale,     text:T.red,       dot:T.red,     border:T.redDim},
+  "Ghosted":        {bg:"#1A1A1A",     text:"#555",      dot:"#333",    border:"#2A2A2A"},
 };
 
 const PRIORITY_META = {
@@ -312,8 +314,10 @@ function PlatformSelect({value, onChange, customPlatforms, onAddPlatform}){
 }
 
 /* ─── Job Modal ──────────────────────────────────────────────────────────── */
-function JobModal({app, onSave, onClose, customPlatforms, onAddPlatform}){
+function JobModal({app, onSave, onClose, customPlatforms, onAddPlatform, customStatuses, onAddStatus, allStatuses}){
   const[form,setForm]=useState({...app, contacts: app.contacts||[], fu1Date:app.fu1Date||"", fu2Date:app.fu2Date||"", fu3Date:app.fu3Date||"", liReqDate:app.liReqDate||"", liMsgDate:app.liMsgDate||""});
+  const[addingStatus,setAddingStatus]=useState(false);
+  const[newStatus,setNewStatus]=useState("");
   const today = new Date().toISOString().slice(0,10);
   const setToday = (k) => setForm(f=>({...f,[k]:today}));
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
@@ -369,9 +373,17 @@ function JobModal({app, onSave, onClose, customPlatforms, onAddPlatform}){
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
             <div>
               <Label>Status</Label>
-              <SInput value={form.status} onChange={v=>set("status",v)}>
-                {STATUSES.map(s=><option key={s}>{s}</option>)}
+              <SInput value={form.status} onChange={v=>{if(v==="__addstatus__"){setAddingStatus(true);}else{set("status",v);}}}>
+                {allStatuses.map(s=><option key={s}>{s}</option>)}
+                <option value="__addstatus__">+ Add status…</option>
               </SInput>
+              {addingStatus&&(
+                <div style={{display:"flex",gap:6,marginTop:6}}>
+                  <TInput value={newStatus} onChange={setNewStatus} placeholder="e.g. HR Round"/>
+                  <Btn small variant="primary" onClick={()=>{if(newStatus.trim()){onAddStatus(newStatus.trim());set("status",newStatus.trim());setNewStatus("");setAddingStatus(false);}}}>Add</Btn>
+                  <Btn small onClick={()=>setAddingStatus(false)}>✕</Btn>
+                </div>
+              )}
             </div>
             <div>
               <Label>Date Saved / Found</Label>
@@ -524,6 +536,7 @@ function JobTracker(){
   const[filterPlatform,setFilterPlatform]=useState("All");
   const[search,setSearch]=useState("");
   const[customPlatforms,setCustomPlatforms]=useState(lsGet("custom_platforms")||[]);
+  const[customStatuses,setCustomStatuses]=useState(lsGet("custom_statuses")||[]);
   const[sortBy,setSortBy]=useState("date");
 
   useEffect(()=>{
@@ -573,6 +586,14 @@ function JobTracker(){
     lsSet("custom_platforms",next);
   };
 
+  const addCustomStatus=(s)=>{
+    const next=[...customStatuses,s];
+    setCustomStatuses(next);
+    lsSet("custom_statuses",next);
+  };
+
+  const allStatuses=[...STATUSES,...customStatuses.filter(s=>!STATUSES.includes(s))];
+
   const allPlatforms=[...DEFAULT_PLATFORMS,...customPlatforms.filter(p=>!DEFAULT_PLATFORMS.includes(p))];
 
   const filtered = apps
@@ -608,7 +629,7 @@ function JobTracker(){
         tr:hover td{background:${T.surfaceHov}!important;}
       `}</style>
 
-      {modal&&<JobModal app={modal} onSave={save} onClose={()=>setModal(null)} customPlatforms={customPlatforms} onAddPlatform={addCustomPlatform}/>}
+      {modal&&<JobModal app={modal} onSave={save} onClose={()=>setModal(null)} customPlatforms={customPlatforms} onAddPlatform={addCustomPlatform} customStatuses={customStatuses} onAddStatus={addCustomStatus} allStatuses={allStatuses}/>}
 
       {/* ── Top bar ── */}
       <div style={{background:T.surface,borderBottom:`1px solid ${T.border}`,padding:"0 24px",display:"flex",alignItems:"center",justifyContent:"space-between",height:52,position:"sticky",top:0,zIndex:100}}>
@@ -649,7 +670,7 @@ function JobTracker(){
           </div>
           <SInput value={filterStatus} onChange={setFilterStatus} full={false}>
             <option value="All">All statuses</option>
-            {STATUSES.map(s=><option key={s}>{s}</option>)}
+            {allStatuses.map(s=><option key={s}>{s}</option>)}
           </SInput>
           <SInput value={filterPriority} onChange={setFilterPriority} full={false}>
             <option value="All">All priorities</option>
@@ -728,7 +749,7 @@ function JobTracker(){
                             color:STATUS_META[app.status]?.text||T.textMid,
                             border:`1px solid ${STATUS_META[app.status]?.border||T.border}`,
                             cursor:"pointer",fontFamily:"inherit",letterSpacing:"0.04em",appearance:"none",paddingRight:16}}>
-                          {STATUSES.map(s=><option key={s}>{s}</option>)}
+                          {allStatuses.map(s=><option key={s}>{s}</option>)}
                         </select>
                       </td>
 
