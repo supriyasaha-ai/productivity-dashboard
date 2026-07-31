@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 /* ─── CONFIGURATION ──────────────────────────────────────────────────────── */
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbymt0JLmP2KEdtXZzu3zH_PWUXOaw1nK2hDV8Rd46a48iX2F8E3dGM7A7eFnnlIZNb1Mg/exec";
+const APPS_SCRIPT_URL = "YOUR_APPS_SCRIPT_URL_HERE";
 /* ────────────────────────────────────────────────────────────────────────── */
 
 /* ─── Dark mode design tokens ────────────────────────────────────────────── */
@@ -525,13 +525,85 @@ function FollowUpAlerts({apps, onStatusChange}){
   );
 }
 
+/* ─── Multi-select status dropdown ──────────────────────────────────────── */
+function StatusMultiSelect({statuses, selected, onChange}){
+  const[open,setOpen]=useState(false);
+  const ref = useRef(null);
+
+  useEffect(()=>{
+    function handleClick(e){ if(ref.current&&!ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", handleClick);
+    return ()=>document.removeEventListener("mousedown", handleClick);
+  },[]);
+
+  const toggle = s => onChange(prev => prev.includes(s) ? prev.filter(x=>x!==s) : [...prev, s]);
+  const label = selected.length===0 ? "All statuses" : selected.length===1 ? selected[0] : `${selected.length} statuses`;
+
+  return(
+    <div ref={ref} style={{position:"relative"}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{
+        display:"inline-flex",alignItems:"center",gap:8,padding:"7px 11px",
+        border:`1px solid ${selected.length>0?T.blue:T.border}`,borderRadius:6,
+        background:selected.length>0?T.bluePale:T.bg,
+        color:selected.length>0?T.blue:T.textMid,
+        fontSize:13,fontWeight:selected.length>0?600:400,cursor:"pointer",fontFamily:"inherit",
+        minWidth:140,justifyContent:"space-between",
+      }}>
+        <span>{label}</span>
+        <span style={{fontSize:10,color:T.textDim}}>{open?"▲":"▼"}</span>
+      </button>
+
+      {open&&(
+        <div style={{
+          position:"absolute",top:"calc(100% + 4px)",left:0,zIndex:200,
+          background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,
+          minWidth:200,boxShadow:"0 8px 24px rgba(0,0,0,.4)",overflow:"hidden",
+        }}>
+          {/* Select all / clear */}
+          <div style={{display:"flex",justifyContent:"space-between",padding:"8px 12px",borderBottom:`1px solid ${T.border}`}}>
+            <button onClick={()=>onChange([...statuses])} style={{fontSize:11,fontWeight:600,color:T.blue,background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:0}}>Select all</button>
+            <button onClick={()=>onChange([])} style={{fontSize:11,fontWeight:600,color:T.textDim,background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:0}}>Clear</button>
+          </div>
+          {/* Options */}
+          {statuses.map(s=>{
+            const checked = selected.includes(s);
+            const m = STATUS_META[s]||STATUS_META["To Apply"];
+            return(
+              <div key={s} onClick={()=>toggle(s)} style={{
+                display:"flex",alignItems:"center",gap:10,padding:"8px 12px",cursor:"pointer",
+                background: checked ? T.surfaceUp : "transparent",
+                transition:"background .1s",
+              }}
+              onMouseEnter={e=>e.currentTarget.style.background=T.surfaceHov}
+              onMouseLeave={e=>e.currentTarget.style.background=checked?T.surfaceUp:"transparent"}>
+                {/* Checkbox */}
+                <div style={{
+                  width:15,height:15,borderRadius:4,flexShrink:0,
+                  border:`1.5px solid ${checked?m.dot:T.border}`,
+                  background:checked?m.bg:"transparent",
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                }}>
+                  {checked&&<span style={{fontSize:9,color:m.text,fontWeight:700,lineHeight:1}}>✓</span>}
+                </div>
+                {/* Status dot + label */}
+                <span style={{width:6,height:6,borderRadius:"50%",background:m.dot,flexShrink:0}}/>
+                <span style={{fontSize:12,fontWeight:checked?600:400,color:checked?T.text:T.textMid}}>{s}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Main Job Tracker ───────────────────────────────────────────────────── */
 function JobTracker(){
   const[apps,setApps]=useState([]);
   const[loaded,setLoaded]=useState(false);
   const[syncStatus,setSyncStatus]=useState(isConfigured()?"idle":"unconfigured");
   const[modal,setModal]=useState(null);
-  const[filterStatus,setFilterStatus]=useState("All");
+  const[filterStatuses,setFilterStatuses]=useState([]);
   const[filterPriority,setFilterPriority]=useState("All");
   const[filterPlatform,setFilterPlatform]=useState("All");
   const[search,setSearch]=useState("");
@@ -597,7 +669,7 @@ function JobTracker(){
   const allPlatforms=[...DEFAULT_PLATFORMS,...customPlatforms.filter(p=>!DEFAULT_PLATFORMS.includes(p))];
 
   const filtered = apps
-    .filter(a=>filterStatus==="All"||a.status===filterStatus)
+    .filter(a=>filterStatuses.length===0||filterStatuses.includes(a.status))
     .filter(a=>filterPriority==="All"||(a.priority||"Medium")===filterPriority)
     .filter(a=>filterPlatform==="All"||a.platform===filterPlatform)
     .filter(a=>{
@@ -648,10 +720,10 @@ function JobTracker(){
 
         {/* ── Stats ── */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
-          <StatCard label="To Apply" value={toApplyN} accent={toApplyN>0?T.textMid:T.textDim} sub="in pipeline" onClick={()=>setFilterStatus("To Apply")}/>
-          <StatCard label="Applied / FU" value={appliedN} accent={T.blue} sub="active outreach" onClick={()=>setFilterStatus("Applied")}/>
+          <StatCard label="To Apply" value={toApplyN} accent={toApplyN>0?T.textMid:T.textDim} sub="in pipeline" onClick={()=>setFilterStatuses(["To Apply"])}/>
+          <StatCard label="Applied / FU" value={appliedN} accent={T.blue} sub="active outreach" onClick={()=>setFilterStatuses(["Applied","Follow-up 1","Follow-up 2","Follow-up 3"])}/>
           <StatCard label="Follow-ups Due" value={alertCount} accent={alertCount>0?T.amber:T.textDim} sub={alertCount>0?"action needed":"all clear ✓"}/>
-          <StatCard label="Interviews" value={interviewN} accent={T.violet} sub="in progress" onClick={()=>setFilterStatus("Interview")}/>
+          <StatCard label="Interviews" value={interviewN} accent={T.violet} sub="in progress" onClick={()=>setFilterStatuses(["Interview"])}/>
           <StatCard label="Offers" value={offerN} accent={T.green} sub={offerN>0?"🎉 congrats!":"keep going"}/>
         </div>
 
@@ -668,10 +740,7 @@ function JobTracker(){
               onBlur={e=>e.target.style.borderColor=T.border}
             />
           </div>
-          <SInput value={filterStatus} onChange={setFilterStatus} full={false}>
-            <option value="All">All statuses</option>
-            {allStatuses.map(s=><option key={s}>{s}</option>)}
-          </SInput>
+          <StatusMultiSelect statuses={allStatuses} selected={filterStatuses} onChange={setFilterStatuses}/>
           <SInput value={filterPriority} onChange={setFilterPriority} full={false}>
             <option value="All">All priorities</option>
             {PRIORITIES.map(p=><option key={p}>{p}</option>)}
@@ -685,8 +754,8 @@ function JobTracker(){
             <option value="priority">Sort: Priority</option>
             <option value="status">Sort: Status</option>
           </SInput>
-          {(filterStatus!=="All"||filterPriority!=="All"||filterPlatform!=="All"||search)&&(
-            <Btn small onClick={()=>{setFilterStatus("All");setFilterPriority("All");setFilterPlatform("All");setSearch("");}}>Clear filters</Btn>
+          {(filterStatuses.length>0||filterPriority!=="All"||filterPlatform!=="All"||search)&&(
+            <Btn small onClick={()=>{setFilterStatuses([]);setFilterPriority("All");setFilterPlatform("All");setSearch("");}}>Clear all</Btn>
           )}
           <span style={{fontSize:11,color:T.textDim,marginLeft:"auto"}}>{filtered.length} shown</span>
         </div>
