@@ -75,36 +75,33 @@ function daysSince(d) {
 
 function getFollowUpAlert(app) {
   if (["To Apply","Rejected","Ghosted","Offer","Interview"].includes(app.status)) return null;
+  const contacts = app.contacts||[];
+  if (contacts.length===0) return null;
 
-  // Applied → remind to send FU1 after 2 days from emailDate
-  if (app.status === "Applied") {
-    const ref = app.emailDate || app.dateApplied;
-    if (!ref) return null;
-    const days = daysSince(ref);
-    if (days >= FU_DAYS[0]) return { msg:`FU1 due — ${days}d since email`, urgency: days>=5?"hot":"warm", next:"Follow-up 1" };
+  // Find the contact that most urgently needs attention
+  let best = null;
+  for (const c of contacts) {
+    let alert = null;
+    if (c.fu3On) {
+      const d = daysSince(c.fu3On);
+      if (d >= 7) alert = { msg:`No reply ${d}d after FU3 (${c.name||"contact"})`, urgency:"ghost", next:"Ghosted" };
+    } else if (c.fu2On) {
+      const d = daysSince(c.fu2On);
+      if (d >= 7) alert = { msg:`FU3 due — ${d}d since FU2 (${c.name||"contact"})`, urgency:"hot", next:"Follow-up 3" };
+    } else if (c.fu1On) {
+      const d = daysSince(c.fu1On);
+      if (d >= 3) alert = { msg:`FU2 due — ${d}d since FU1 (${c.name||"contact"})`, urgency: d>=5?"hot":"warm", next:"Follow-up 2" };
+    } else if (c.emailedOn) {
+      const d = daysSince(c.emailedOn);
+      if (d >= 2) alert = { msg:`FU1 due — ${d}d since email (${c.name||"contact"})`, urgency: d>=5?"hot":"warm", next:"Follow-up 1" };
+    }
+    if (alert) {
+      const score = {hot:0,warm:1,ghost:2}[alert.urgency]??3;
+      const bestScore = best ? ({hot:0,warm:1,ghost:2}[best.urgency]??3) : 99;
+      if (score < bestScore) best = alert;
+    }
   }
-  // Follow-up 1 → remind FU2 after 3 more days (5 total from email)
-  if (app.status === "Follow-up 1") {
-    const ref = app.fu1Date || app.emailDate || app.dateApplied;
-    if (!ref) return null;
-    const days = daysSince(ref);
-    if (days >= 3) return { msg:`FU2 due — ${days}d since FU1`, urgency: days>=5?"hot":"warm", next:"Follow-up 2" };
-  }
-  // Follow-up 2 → remind FU3 after 7 more days
-  if (app.status === "Follow-up 2") {
-    const ref = app.fu2Date || app.fu1Date || app.emailDate || app.dateApplied;
-    if (!ref) return null;
-    const days = daysSince(ref);
-    if (days >= 7) return { msg:`FU3 due — ${days}d since FU2`, urgency:"hot", next:"Follow-up 3" };
-  }
-  // Follow-up 3 → suggest Ghosted after 7 days
-  if (app.status === "Follow-up 3") {
-    const ref = app.fu3Date || app.fu2Date || app.emailDate || app.dateApplied;
-    if (!ref) return null;
-    const days = daysSince(ref);
-    if (days >= 7) return { msg:`No reply in ${days}d — mark Ghosted?`, urgency:"ghost", next:"Ghosted" };
-  }
-  return null;
+  return best;
 }
 
 /* ─── Storage ────────────────────────────────────────────────────────────── */
@@ -160,13 +157,17 @@ function exportCSV(apps) {
   URL.revokeObjectURL(url);
 }
 
+const emptyContact = () => ({
+  id: Date.now() + Math.random(),
+  name:"", email:"", url:"",
+  emailedOn:"", fu1On:"", fu2On:"", fu3On:"",
+  liReqOn:"", liMsgOn:"",
+});
+
 const emptyApp = () => ({
   id: Date.now() + Math.random(),
   company:"", role:"", jobLink:"",
   dateApplied: new Date().toISOString().slice(0,10),
-  emailDate:"",
-  fu1Date:"", fu2Date:"", fu3Date:"",
-  liReqDate:"", liMsgDate:"",
   platform:"LinkedIn",
   status:"To Apply", priority:"Medium",
   contacts:[],
@@ -248,44 +249,103 @@ function SyncBadge({status}){
   return <span style={{fontSize:11,fontWeight:600,color:s.color}}>{s.label}</span>;
 }
 
-/* ─── Contact Manager (inside modal) ────────────────────────────────────── */
+/* ─── Contact Manager ────────────────────────────────────────────────────── */
 function ContactManager({contacts, onChange}){
-  const add = () => onChange([...contacts, {id:Date.now(), name:"", url:"", emailedOn:"", liOn:""}]);
+  const today = new Date().toISOString().slice(0,10);
+  const add = () => onChange([...contacts, emptyContact()]);
   const update = (id, field, val) => onChange(contacts.map(c => c.id===id ? {...c,[field]:val} : c));
+  const setToday = (id, field) => update(id, field, today);
   const remove = (id) => onChange(contacts.filter(c => c.id!==id));
+
+  const outreachFields = [
+    {key:"emailedOn", label:"Email Sent",    color:T.blue,    icon:"✉"},
+    {key:"fu1On",     label:"Follow-up 1",   color:T.amber,   icon:"↩1"},
+    {key:"fu2On",     label:"Follow-up 2",   color:"#FFD060", icon:"↩2"},
+    {key:"fu3On",     label:"Follow-up 3",   color:"#FF9020", icon:"↩3"},
+    {key:"liReqOn",   label:"LI Request",    color:"#4A90D9", icon:"in→"},
+    {key:"liMsgOn",   label:"LI Message",    color:"#4A90D9", icon:"💬"},
+  ];
+
+  // work out next action needed per contact
+  function getContactAlert(c) {
+    if (c.fu3On) {
+      const d = daysSince(c.fu3On);
+      if (d >= 7) return {msg:`No reply ${d}d after FU3`, color:T.textDim};
+    }
+    if (c.fu2On && !c.fu3On) {
+      const d = daysSince(c.fu2On);
+      if (d >= 7) return {msg:`FU3 due — ${d}d since FU2`, color:"#FF9020"};
+    }
+    if (c.fu1On && !c.fu2On) {
+      const d = daysSince(c.fu1On);
+      if (d >= 3) return {msg:`FU2 due — ${d}d since FU1`, color:T.amber};
+    }
+    if (c.emailedOn && !c.fu1On) {
+      const d = daysSince(c.emailedOn);
+      if (d >= 2) return {msg:`FU1 due — ${d}d since email`, color:T.amber};
+    }
+    return null;
+  }
 
   return(
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-        <Label>Contacts</Label>
-        <button onClick={add} style={{background:T.bluePale,border:`1px solid ${T.blueDim}`,color:T.blue,borderRadius:5,padding:"2px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add Contact</button>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <span style={{fontSize:12,color:T.textDim}}>{contacts.length===0?"No contacts yet — add people you're reaching out to":` ${contacts.length} contact${contacts.length>1?"s":""}`}</span>
+        <button onClick={add} style={{background:T.bluePale,border:`1px solid ${T.blueDim}`,color:T.blue,borderRadius:6,padding:"4px 12px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add Contact</button>
       </div>
-      {contacts.length===0 && <div style={{fontSize:12,color:T.textDim,padding:"8px 0"}}>No contacts added yet</div>}
-      {contacts.map(c=>(
-        <div key={c.id} style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,padding:"10px 12px",marginBottom:8}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-            <div>
-              <Label>Name</Label>
-              <TInput value={c.name} onChange={v=>update(c.id,"name",v)} placeholder="e.g. Riya Sharma"/>
+
+      {contacts.map((c,ci)=>{
+        const alert = getContactAlert(c);
+        return(
+          <div key={c.id} style={{background:T.bg,border:`1px solid ${alert?T.amberDim:T.border}`,borderRadius:8,padding:"12px 14px",marginBottom:10}}>
+
+            {/* Header row */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <span style={{fontSize:11,fontWeight:700,color:T.textDim,textTransform:"uppercase",letterSpacing:"0.1em"}}>Contact {ci+1}</span>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                {alert&&<span style={{fontSize:11,fontWeight:600,color:alert.color}}>⏰ {alert.msg}</span>}
+                <button onClick={()=>remove(c.id)} style={{background:T.redPale,border:`1px solid ${T.redDim}`,color:T.red,borderRadius:5,padding:"3px 8px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✕ Remove</button>
+              </div>
             </div>
-            <div>
-              <Label>LinkedIn URL</Label>
-              <TInput value={c.url} onChange={v=>update(c.id,"url",v)} placeholder="linkedin.com/in/..."/>
+
+            {/* Name + Email + LinkedIn */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+              <div>
+                <Label>Name</Label>
+                <TInput value={c.name} onChange={v=>update(c.id,"name",v)} placeholder="e.g. Riya Sharma"/>
+              </div>
+              <div>
+                <Label>Email Address</Label>
+                <TInput value={c.email||""} onChange={v=>update(c.id,"email",v)} placeholder="riya@company.com"/>
+              </div>
+              <div>
+                <Label>LinkedIn URL</Label>
+                <TInput value={c.url} onChange={v=>update(c.id,"url",v)} placeholder="linkedin.com/in/..."/>
+              </div>
             </div>
+
+            {/* Outreach dates grid */}
+            <div style={{borderTop:`1px solid ${T.border}`,paddingTop:10}}>
+              <p style={{margin:"0 0 8px",fontSize:10,fontWeight:700,color:T.textDim,textTransform:"uppercase",letterSpacing:"0.1em"}}>Outreach Dates</p>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                {outreachFields.map(f=>(
+                  <div key={f.key}>
+                    <p style={{margin:"0 0 5px",fontSize:10,fontWeight:700,color:f.color,textTransform:"uppercase",letterSpacing:"0.08em"}}>{f.icon} {f.label}</p>
+                    <div style={{display:"flex",gap:4}}>
+                      <TInput type="date" value={c[f.key]||""} onChange={v=>update(c.id,f.key,v)}/>
+                      {!c[f.key]
+                        ?<button onClick={()=>setToday(c.id,f.key)} style={{flexShrink:0,background:T.surfaceUp,border:`1px solid ${T.border}`,color:T.textMid,borderRadius:6,padding:"0 8px",cursor:"pointer",fontSize:11,fontFamily:"inherit",whiteSpace:"nowrap"}}>Today</button>
+                        :<button onClick={()=>update(c.id,f.key,"")} style={{flexShrink:0,background:T.redPale,border:`1px solid ${T.redDim}`,color:T.red,borderRadius:6,padding:"0 7px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>×</button>
+                      }
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"flex-end"}}>
-            <div>
-              <Label>Emailed on</Label>
-              <TInput type="date" value={c.emailedOn} onChange={v=>update(c.id,"emailedOn",v)}/>
-            </div>
-            <div>
-              <Label>LinkedIn msg on</Label>
-              <TInput type="date" value={c.liOn} onChange={v=>update(c.id,"liOn",v)}/>
-            </div>
-            <button onClick={()=>remove(c.id)} style={{background:T.redPale,border:`1px solid ${T.redDim}`,color:T.red,borderRadius:5,padding:"7px 10px",fontSize:12,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>✕</button>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -315,11 +375,9 @@ function PlatformSelect({value, onChange, customPlatforms, onAddPlatform}){
 
 /* ─── Job Modal ──────────────────────────────────────────────────────────── */
 function JobModal({app, onSave, onClose, customPlatforms, onAddPlatform, customStatuses, onAddStatus, allStatuses}){
-  const[form,setForm]=useState({...app, contacts: app.contacts||[], fu1Date:app.fu1Date||"", fu2Date:app.fu2Date||"", fu3Date:app.fu3Date||"", liReqDate:app.liReqDate||"", liMsgDate:app.liMsgDate||""});
+  const[form,setForm]=useState({...app, contacts: (app.contacts||[]).map(c=>({...emptyContact(),...c}))});
   const[addingStatus,setAddingStatus]=useState(false);
   const[newStatus,setNewStatus]=useState("");
-  const today = new Date().toISOString().slice(0,10);
-  const setToday = (k) => setForm(f=>({...f,[k]:today}));
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
 
   return(
@@ -390,81 +448,18 @@ function JobModal({app, onSave, onClose, customPlatforms, onAddPlatform, customS
               <TInput type="date" value={form.dateApplied} onChange={v=>set("dateApplied",v)}/>
             </div>
             <div>
-              <Label>Date Applied / Emailed</Label>
-              <div style={{display:"flex",gap:4}}>
-                <TInput type="date" value={form.emailDate} onChange={v=>set("emailDate",v)}/>
-                <button onClick={()=>setToday("emailDate")} title="Set to today" style={{flexShrink:0,background:T.bluePale,border:`1px solid ${T.blueDim}`,color:T.blue,borderRadius:6,padding:"0 8px",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>Today</button>
-              </div>
+              <Label>Priority</Label>
+              <SInput value={form.priority} onChange={v=>set("priority",v)}>
+                {PRIORITIES.map(p=><option key={p}>{p}</option>)}
+              </SInput>
             </div>
           </div>
+          <p style={{margin:"8px 0 0",fontSize:11,color:T.textDim}}>⚡ FU schedule per contact: FU1 after 2d · FU2 after 3d · FU3 after 7d · suggest Ghosted after 7d no reply</p>
         </div>
 
-        {/* Section: Outreach Timeline */}
+        {/* Section: Contacts + Outreach (combined) */}
         <div style={{marginBottom:"1.25rem",paddingTop:"1rem",borderTop:`1px solid ${T.border}`}}>
-          <div style={{fontSize:10,fontWeight:700,color:T.blue,textTransform:"uppercase",letterSpacing:"0.14em",marginBottom:12}}>OUTREACH TIMELINE</div>
-
-          {/* Visual timeline */}
-          <div style={{display:"flex",alignItems:"center",gap:0,marginBottom:16,overflowX:"auto",paddingBottom:4}}>
-            {[
-              {label:"Email Sent",  key:"emailDate", color:T.blue,   icon:"✉"},
-              {label:"Follow-up 1", key:"fu1Date",   color:T.amber,  icon:"↩"},
-              {label:"Follow-up 2", key:"fu2Date",   color:"#FFD060", icon:"↩"},
-              {label:"Follow-up 3", key:"fu3Date",   color:"#FF9020", icon:"↩"},
-              {label:"LI Request",  key:"liReqDate", color:"#0A66C2", icon:"in"},
-              {label:"LI Message",  key:"liMsgDate", color:"#0A66C2", icon:"💬"},
-            ].map((step, idx, arr)=>{
-              const filled = !!form[step.key];
-              return(
-                <div key={step.key} style={{display:"flex",alignItems:"center",flexShrink:0}}>
-                  <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,minWidth:72}}>
-                    <div style={{
-                      width:32,height:32,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",
-                      fontSize:12,fontWeight:700,
-                      background:filled?step.color+"22":"transparent",
-                      border:`2px solid ${filled?step.color:T.border}`,
-                      color:filled?step.color:T.textDim,
-                    }}>{step.icon}</div>
-                    <span style={{fontSize:9,fontWeight:600,color:filled?step.color:T.textDim,textAlign:"center",lineHeight:1.2,whiteSpace:"nowrap"}}>{step.label}</span>
-                    {filled&&<span style={{fontSize:9,color:T.textDim,whiteSpace:"nowrap"}}>{new Date(form[step.key]).toLocaleDateString("en-IN",{day:"numeric",month:"short"})}</span>}
-                  </div>
-                  {idx<arr.length-1&&<div style={{width:20,height:1,background:T.border,flexShrink:0,marginBottom:16}}/>}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Date fields */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            {[
-              {label:"Email Sent On",    key:"emailDate", color:T.blue},
-              {label:"Follow-up 1 Sent", key:"fu1Date",   color:T.amber},
-              {label:"Follow-up 2 Sent", key:"fu2Date",   color:"#FFD060"},
-              {label:"Follow-up 3 Sent", key:"fu3Date",   color:"#FF9020"},
-              {label:"LinkedIn Request Sent", key:"liReqDate", color:"#0A66C2"},
-              {label:"LinkedIn Message Sent", key:"liMsgDate", color:"#0A66C2"},
-            ].map(field=>(
-              <div key={field.key}>
-                <p style={{margin:"0 0 5px",fontSize:10,fontWeight:700,color:field.color,textTransform:"uppercase",letterSpacing:"0.1em"}}>{field.label}</p>
-                <div style={{display:"flex",gap:4}}>
-                  <TInput type="date" value={form[field.key]} onChange={v=>set(field.key,v)}/>
-                  {!form[field.key]&&(
-                    <button onClick={()=>setToday(field.key)} title="Mark today"
-                      style={{flexShrink:0,background:T.surfaceUp,border:`1px solid ${T.border}`,color:T.textMid,borderRadius:6,padding:"0 8px",cursor:"pointer",fontSize:11,fontFamily:"inherit",whiteSpace:"nowrap"}}>Today</button>
-                  )}
-                  {form[field.key]&&(
-                    <button onClick={()=>set(field.key,"")}
-                      style={{flexShrink:0,background:T.redPale,border:`1px solid ${T.redDim}`,color:T.red,borderRadius:6,padding:"0 7px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>×</button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-          <p style={{margin:"10px 0 0",fontSize:11,color:T.textDim}}>⚡ FU schedule: FU1 after 2d · FU2 after 3 more days · FU3 after 7 more days · Ghosted if no reply 7d after FU3</p>
-        </div>
-
-        {/* Section: Contacts */}
-        <div style={{marginBottom:"1.25rem",paddingTop:"1rem",borderTop:`1px solid ${T.border}`}}>
-          <div style={{fontSize:10,fontWeight:700,color:T.blue,textTransform:"uppercase",letterSpacing:"0.14em",marginBottom:10}}>CONTACTS</div>
+          <div style={{fontSize:10,fontWeight:700,color:T.blue,textTransform:"uppercase",letterSpacing:"0.14em",marginBottom:10}}>CONTACTS & OUTREACH</div>
           <ContactManager contacts={form.contacts} onChange={v=>set("contacts",v)}/>
         </div>
 
@@ -773,7 +768,7 @@ function JobTracker(){
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
               <thead>
                 <tr style={{background:T.surfaceUp,borderBottom:`1px solid ${T.border}`}}>
-                  {[["","28px"],["Company","150px"],["Role","150px"],["Status","130px"],["Platform","90px"],["Outreach Dates","170px"],["Follow-up","120px"],["Contacts","140px"],["Salary","120px"],["Notes","160px"],["Actions","90px"]].map(([h,w])=>(
+                  {[["","28px"],["Company","150px"],["Role","150px"],["Status","130px"],["Platform","90px"],["Outreach / Contacts","190px"],["Follow-up","130px"],["Salary","120px"],["Notes","160px"],["Actions","90px"]].map(([h,w])=>(
                     <th key={h} style={{padding:"9px 12px",textAlign:"left",fontWeight:600,color:T.textDim,fontSize:10,textTransform:"uppercase",letterSpacing:"0.1em",width:w,whiteSpace:"nowrap"}}>{h}</th>
                   ))}
                 </tr>
@@ -829,23 +824,30 @@ function JobTracker(){
 
                       {/* Outreach Dates */}
                       <td style={{padding:"10px 12px"}}>
-                        <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                          {[
-                            {label:"✉",  key:"emailDate",  color:T.blue},
-                            {label:"↩1", key:"fu1Date",    color:T.amber},
-                            {label:"↩2", key:"fu2Date",    color:"#FFD060"},
-                            {label:"↩3", key:"fu3Date",    color:"#FF9020"},
-                            {label:"in→", key:"liReqDate", color:"#4A90D9"},
-                            {label:"💬", key:"liMsgDate",  color:"#4A90D9"},
-                          ].filter(f=>app[f.key]).map(f=>(
-                            <div key={f.key} style={{display:"flex",alignItems:"center",gap:5}}>
-                              <span style={{fontSize:10,fontWeight:700,color:f.color,minWidth:18}}>{f.label}</span>
-                              <span style={{fontSize:10,color:T.textMid}}>{new Date(app[f.key]).toLocaleDateString("en-IN",{day:"numeric",month:"short"})}</span>
-                              <span style={{fontSize:9,color:T.textDim}}>({daysSince(app[f.key])}d)</span>
-                            </div>
-                          ))}
-                          {!app.emailDate&&!app.fu1Date&&!app.liReqDate&&<span style={{fontSize:10,color:T.textDim}}>—</span>}
-                        </div>
+                        {contacts.length===0?(
+                          <span style={{fontSize:11,color:T.textDim}}>—</span>
+                        ):(
+                          <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                            {contacts.map((c,ci)=>{
+                              const lastAction = c.fu3On||c.fu2On||c.fu1On||c.emailedOn||c.liMsgOn||c.liReqOn;
+                              const lastLabel = c.fu3On?"FU3":c.fu2On?"FU2":c.fu1On?"FU1":c.emailedOn?"Emailed":c.liMsgOn?"LI msg":c.liReqOn?"LI req":null;
+                              const lastColor = c.fu3On?"#FF9020":c.fu2On?"#FFD060":c.fu1On?T.amber:c.emailedOn?T.blue:"#4A90D9";
+                              return(
+                                <div key={ci} style={{display:"flex",alignItems:"center",gap:5}}>
+                                  {c.url
+                                    ?<a href={c.url.startsWith("http")?c.url:`https://${c.url}`} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:T.blue,textDecoration:"none",fontWeight:500,maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"Contact"}</a>
+                                    :<span style={{fontSize:11,color:T.textMid,maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"Contact"}</span>
+                                  }
+                                  {lastLabel&&(
+                                    <span style={{fontSize:10,fontWeight:600,color:lastColor,background:lastColor+"18",padding:"1px 6px",borderRadius:3,whiteSpace:"nowrap"}}>
+                                      {lastLabel} {lastAction?`${daysSince(lastAction)}d`:""}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </td>
 
                       {/* Follow-up alert */}
@@ -876,26 +878,6 @@ function JobTracker(){
                         {!app.salaryRange&&!app.expectedSalary&&<span style={{color:T.textDim}}>—</span>}
                       </td>
 
-                      {/* Contacts */}
-                      <td style={{padding:"10px 12px",maxWidth:160}}>
-                        {contacts.length===0?<span style={{color:T.textDim,fontSize:11}}>—</span>:(
-                          <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                            {contacts.map((c,ci)=>(
-                              <div key={ci} style={{display:"flex",alignItems:"center",gap:4}}>
-                                {c.url?(
-                                  <a href={c.url.startsWith("http")?c.url:`https://${c.url}`} target="_blank" rel="noopener noreferrer"
-                                    style={{fontSize:11,color:T.blue,textDecoration:"none",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>
-                                    {c.name||"Contact"}
-                                  </a>
-                                ):<span style={{fontSize:11,color:T.textMid,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{c.name||"—"}</span>}
-                                {c.emailedOn&&<span style={{fontSize:9,color:T.textDim}} title={`Emailed: ${c.emailedOn}`}>✉</span>}
-                                {c.liOn&&<span style={{fontSize:9,color:"#0A66C2"}} title={`LI msg: ${c.liOn}`}>in</span>}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </td>
-
                       {/* Notes */}
                       <td style={{padding:"10px 12px",maxWidth:180}}>
                         {app.notes
@@ -907,7 +889,7 @@ function JobTracker(){
                       {/* Actions */}
                       <td style={{padding:"10px 12px"}}>
                         <div style={{display:"flex",gap:5}}>
-                          <Btn onClick={()=>setModal({...app,contacts:app.contacts||[]})} variant="ghost" small>Edit</Btn>
+                          <Btn onClick={()=>setModal({...app,contacts:(app.contacts||[]).map(c=>({...emptyContact(),...c}))})} variant="ghost" small>Edit</Btn>
                           <Btn onClick={()=>del(app.id)} variant="danger" small>✕</Btn>
                         </div>
                       </td>
